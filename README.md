@@ -42,6 +42,7 @@ clickhouse-go-linter ./...
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Rules
+The rules are independent of the protocol used (`HTTP` / `TCP`).
 
 ## 1. chrowserr
 Detect when the `github.com/ClickHouse/clickhouse-go/v2/lib/driver` `Rows.Err()` call is missing after a call to `Rows.Next()`.
