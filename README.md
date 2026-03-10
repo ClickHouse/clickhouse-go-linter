@@ -2,6 +2,10 @@
 
 A linter for the [clickhouse-go](https://github.com/ClickHouse/clickhouse-go/tree/main) driver.
 
+This linter targets the ClickHouse-native API (`clickhouse_api`): connections opened via `clickhouse.Open()` returning a `clickhouse.Conn`.  
+It does not apply to the standard `database/sql` interface opened via `clickhouse.OpenDB()` or `sql.Open()`. 
+See [documentation](https://clickhouse.com/docs/integrations/go#the-clickhouse-go-client) for more details on the two interfaces.
+
 The linter detects 2 common implementation mistakes:
 - forgetting to call `rows.Err()` after calling `rows.Next()`
 - forgetting to call `defer batch.Close()` when using `Batch`
