@@ -13,6 +13,10 @@ vet:
 test:
 	go test ./...
 
+.PHONY: lint
+lint:
+	golangci-lint run
+
 .PHONY: build
 build:
 	go build -o bin/clickhouse-go-linter .
