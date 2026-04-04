@@ -9,5 +9,5 @@ import (
 )
 
 func TestAnalyzer(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), chrowserr.Analyzer, "testcases")
+	analysistest.Run(t, analysistest.TestData(), chrowserr.NewAnalyzer(), "testcases")
 }
