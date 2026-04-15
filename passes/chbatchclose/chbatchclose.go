@@ -30,7 +30,7 @@ func NewAnalyzer() *analysis.Analyzer {
 	}
 }
 
-func (a *analyzer) run(pass *analysis.Pass) (interface{}, error) {
+func (a *analyzer) run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{
