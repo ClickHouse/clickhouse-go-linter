@@ -212,3 +212,6 @@ There are some limitations:
   writing such correct code is difficult and prone to regressions, and because `defer batch.Close` does not 
   change the code correctness and is easy to add, this linter enforces its usage.
 
+## Development
+If `CH_GO_LINTER_DEBUG` is set to `TRUE` (or any truthy value), the linter also repots valid usages. 
+This can be useful for to troubleshoot the linter behavior.
