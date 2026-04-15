@@ -14,13 +14,13 @@ import (
 
 type analyzer struct {
 	// if true, report valid usages and log spurious but valid cases.
-	devMode bool
+	debug bool
 }
 
 func NewAnalyzer() *analysis.Analyzer {
-	_, devMode := os.LookupEnv("CH_GO_LINTER_DEBUG")
+	_, debug := os.LookupEnv("CH_GO_LINTER_DEBUG")
 	a := analyzer{
-		devMode: devMode,
+		debug: debug,
 	}
 	return &analysis.Analyzer{
 		Name:     "chbatchclosecheck",
@@ -63,7 +63,7 @@ type batchUsage struct {
 	returned      bool
 }
 
-func (b *batchUsage) report(varName string, pass *analysis.Pass, devMode bool) {
+func (b *batchUsage) report(varName string, pass *analysis.Pass, debug bool) {
 	if b.assignPos == token.NoPos {
 		// no usage of Batch
 		return
@@ -72,7 +72,7 @@ func (b *batchUsage) report(varName string, pass *analysis.Pass, devMode bool) {
 		pass.Reportf(b.assignPos,
 			"clickhouse Batch %s must be closed defensively with defer %s.Close() after successful instantiation",
 			varName, varName)
-	} else if devMode {
+	} else if debug {
 		if b.deferredClose {
 			pass.Reportf(b.assignPos,
 				"clickhouse Batch %s is properly closed defensively after successful instantiation [valid]",
@@ -116,7 +116,7 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 
 	// remaining usages that were not flushed
 	for varName, u := range usages {
-		u.report(varName, pass, a.devMode)
+		u.report(varName, pass, a.debug)
 	}
 }
 
@@ -135,7 +135,7 @@ func (a *analyzer) handleAssign(pass *analysis.Pass, assign *ast.AssignStmt, usa
 
 		// if this var was already tracked, flush previous usage before re-tracking
 		if u, ok := usages[name]; ok {
-			u.report(name, pass, a.devMode)
+			u.report(name, pass, a.debug)
 			delete(usages, name)
 		}
 
