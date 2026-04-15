@@ -64,7 +64,7 @@ func (b *batchUsage) report(varName string, pass *analysis.Pass) {
 		// no usage of rows.Next()
 		return
 	}
-	if !(b.deferredClose || b.returned) {
+	if !b.deferredClose && !b.returned {
 		pass.Reportf(b.assignPos,
 			"clickhouse Batch %s must be closed defensively with defer %s.Close() after successful instantiation",
 			varName, varName)
