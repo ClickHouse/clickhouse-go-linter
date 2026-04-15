@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"os"
+	"strconv"
 
 	"github.com/ClickHouse/clickhouse-go-linter/internal/util"
 
@@ -18,7 +19,7 @@ type analyzer struct {
 }
 
 func NewAnalyzer() *analysis.Analyzer {
-	_, debug := os.LookupEnv("CH_GO_LINTER_DEBUG")
+	debug, _ := strconv.ParseBool(os.Getenv("CH_GO_LINTER_DEBUG"))
 	a := analyzer{
 		debug: debug,
 	}
