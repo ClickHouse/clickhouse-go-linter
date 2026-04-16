@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	multichecker.Main(chrowserr.Analyzer, chbatchclose.Analyzer)
+	multichecker.Main(chrowserr.NewAnalyzer(), chbatchclose.NewAnalyzer())
 }

@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/token"
 	"log"
+	"os"
+	"strconv"
 
 	"github.com/ClickHouse/clickhouse-go-linter/internal/util"
 	"golang.org/x/tools/go/analysis"
@@ -11,22 +13,25 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 )
 
-var reportValid bool
-var isDebug bool
-
-func init() {
-	Analyzer.Flags.BoolVar(&reportValid, "report-valid", false, "Set to true to report valid usages. Used for development purpose to ensure all usages are found.")
-	Analyzer.Flags.BoolVar(&isDebug, "log-spurious-cases", false, "Set to true to log spurious but valid cases. Used for development purpose.")
+type analyzer struct {
+	// if true, report valid usages and log spurious but valid cases.
+	debug bool
 }
 
-var Analyzer = &analysis.Analyzer{
-	Name:     "chrowserrcheck",
-	Doc:      "chrowserrcheck checks whether ClickHouse driver Rows.Err is called after Rows.Next()",
-	Run:      run,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
+func NewAnalyzer() *analysis.Analyzer {
+	debug, _ := strconv.ParseBool(os.Getenv("CH_GO_LINTER_DEBUG"))
+	a := analyzer{
+		debug: debug,
+	}
+	return &analysis.Analyzer{
+		Name:     "chrowserrcheck",
+		Doc:      "chrowserrcheck checks whether ClickHouse driver Rows.Err is called after Rows.Next()",
+		Run:      a.run,
+		Requires: []*analysis.Analyzer{inspect.Analyzer},
+	}
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func (a *analyzer) run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{
@@ -46,7 +51,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		if body == nil {
 			return
 		}
-		checkFunc(pass, body)
+		a.checkFunc(pass, body)
 	})
 
 	return nil, nil
@@ -58,7 +63,7 @@ type rowsUsage struct {
 	errCalled bool
 }
 
-func (r *rowsUsage) report(varName string, pass *analysis.Pass) {
+func (r *rowsUsage) report(varName string, pass *analysis.Pass, debug bool) {
 	if r.nextPos == token.NoPos {
 		// no usage of rows.Next()
 		return
@@ -68,7 +73,7 @@ func (r *rowsUsage) report(varName string, pass *analysis.Pass) {
 		pass.Reportf(r.nextPos,
 			"clickhouse %s.Err() must be checked after %s.Next()",
 			varName, varName)
-	} else if reportValid {
+	} else if debug {
 		// for dev purpose - list valid usages
 		pass.Reportf(r.nextPos,
 			"clickhouse %s.Err() is properly called after %s.Next() [valid]",
@@ -79,7 +84,7 @@ func (r *rowsUsage) report(varName string, pass *analysis.Pass) {
 // checkFunc analyzes a single function/closure body.
 // It does a single-pass collection of Next() and Err() calls,
 // it does not descend into nested closures (they are handled as separate units by the Preorder visitor above).
-func checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
+func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 	usages := map[string]*rowsUsage{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		if n == nil {
@@ -100,7 +105,7 @@ func checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 					continue
 				}
 				if s, ok := usages[name]; ok {
-					s.report(name, pass)
+					s.report(name, pass, a.debug)
 				}
 				delete(usages, name)
 			}
@@ -130,17 +135,16 @@ func checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 		case "Next":
 			if _, exists := usages[varName]; !exists {
 				usages[varName] = &rowsUsage{nextPos: call.Pos()}
-			} else if isDebug {
+			} else if a.debug {
 				log.Printf("Rows.Next() is written multiple times with no re-assignment. Valid but rare usage. If this observation is not correct, it is a bug in this linter library. Please reach out to maintainer.")
 				// in particular could be a bug in the re-assignment detection
 			}
 		case "Err":
 			if s, exists := usages[varName]; exists {
 				s.errCalled = true
-				s.report(varName, pass)
+				s.report(varName, pass, a.debug)
 				delete(usages, varName)
-			} else if isDebug {
-
+			} else if a.debug {
 				log.Printf("%s.Err() is called on ClickHouse Rows %s but %s.Next() was never called. Valid but unexpected usage. If this observation is not correct, it is a bug in this linter library. Please reach out to maintainer.",
 					varName, varName, varName)
 				// in particular could be a bug in the re-assignment detection
@@ -153,6 +157,6 @@ func checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 
 	// remaining usages that were not flushed (misusages only, as correct usages are flushed already)
 	for varName, s := range usages {
-		s.report(varName, pass)
+		s.report(varName, pass, a.debug)
 	}
 }
