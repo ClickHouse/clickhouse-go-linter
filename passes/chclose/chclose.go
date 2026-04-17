@@ -1,4 +1,4 @@
-package chbatchclose
+package chclose
 
 import (
 	"go/ast"
@@ -24,8 +24,8 @@ func NewAnalyzer() *analysis.Analyzer {
 		debug: debug,
 	}
 	return &analysis.Analyzer{
-		Name:     "chbatchclosecheck",
-		Doc:      "chbatchclosecheck checks whether defer batch.Close() is called on ClickHouse driver Batch variables",
+		Name:     "chclosecheck",
+		Doc:      "chclosecheck checks whether defer xxx.Close() is called on ClickHouse driver Batch/Rows variables",
 		Run:      a.run,
 		Requires: []*analysis.Analyzer{inspect.Analyzer},
 	}
@@ -57,31 +57,35 @@ func (a *analyzer) run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-// batchUsage tracks whether a driver.Batch variable has a defer Close/Abort or is returned.
-type batchUsage struct {
+// closableTypes lists the ClickHouse driver types that must be closed defensively.
+var closableTypes = []string{"Batch", "Rows"}
+
+// closableUsage tracks whether a driver.Batch / driver.Rows variable has a defer Close() or is returned.
+type closableUsage struct {
+	typeName      string // "Batch" or "Rows"
 	assignPos     token.Pos
 	deferredClose bool
 	returned      bool
 }
 
-func (b *batchUsage) report(varName string, pass *analysis.Pass, debug bool) {
-	if b.assignPos == token.NoPos {
+func (u *closableUsage) report(varName string, pass *analysis.Pass, debug bool) {
+	if u.assignPos == token.NoPos {
 		// no usage of Batch
 		return
 	}
-	if !b.deferredClose && !b.returned {
-		pass.Reportf(b.assignPos,
-			"clickhouse Batch %s must be closed defensively with defer %s.Close() after successful instantiation",
-			varName, varName)
+	if !u.deferredClose && !u.returned {
+		pass.Reportf(u.assignPos,
+			"clickhouse %s %s must be closed defensively with defer %s.Close() after successful instantiation",
+			u.typeName, varName, varName)
 	} else if debug {
-		if b.deferredClose {
-			pass.Reportf(b.assignPos,
-				"clickhouse Batch %s is properly closed defensively after successful instantiation [valid]",
-				varName)
+		if u.deferredClose {
+			pass.Reportf(u.assignPos,
+				"clickhouse %s %s is properly closed defensively after successful instantiation [valid]",
+				u.typeName, varName)
 		} else {
-			pass.Reportf(b.assignPos,
-				"clickhouse Batch %s is returned by the function [valid]",
-				varName)
+			pass.Reportf(u.assignPos,
+				"clickhouse %s %s is returned by the function [valid]",
+				u.typeName, varName)
 		}
 	}
 }
@@ -90,7 +94,7 @@ func (b *batchUsage) report(varName string, pass *analysis.Pass, debug bool) {
 // It does a single-pass collection of Batch assignments, defer Close/Abort calls, and return statements.
 // It does not descend into nested closures (they are handled as separate units by the Preorder visitor above).
 func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
-	usages := map[string]*batchUsage{}
+	usages := map[string]*closableUsage{}
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		if n == nil {
@@ -121,33 +125,40 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 	}
 }
 
-// handleAssign checks if any LHS variable in the assignment is of type driver.Batch.
+// handleAssign checks if any LHS variable in the assignment is a closable ClickHouse driver type.
 // If a tracked variable is reassigned, it flushes/reports the previous tracking first.
-func (a *analyzer) handleAssign(pass *analysis.Pass, assign *ast.AssignStmt, usages map[string]*batchUsage) {
+func (a *analyzer) handleAssign(pass *analysis.Pass, assign *ast.AssignStmt, usages map[string]*closableUsage) {
 	for _, lhs := range assign.Lhs {
 		name := util.IdentName(lhs)
 		if name == "" {
 			continue
 		}
-		if name == "_" && util.IsChObj(pass, lhs, "Batch") {
-			pass.Reportf(assign.Pos(), "clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer batch.Close() after successful instantiation")
-			continue
-		}
 
-		// if this var was already tracked, flush previous usage before re-tracking
-		if u, ok := usages[name]; ok {
-			u.report(name, pass, a.debug)
-			delete(usages, name)
-		}
+		for _, typeName := range closableTypes {
+			if !util.IsChObj(pass, lhs, typeName) {
+				continue
+			}
 
-		if util.IsChObj(pass, lhs, "Batch") {
-			usages[name] = &batchUsage{assignPos: assign.Pos()}
+			if name == "_" {
+				pass.Reportf(assign.Pos(), "clickhouse %s assigned to blank identifier. Connection leak. clickhouse %s must be instantiated and closed defensively with defer %s.Close() after successful instantiation",
+					typeName, typeName, typeName)
+				break
+			}
+
+			// if this var was already tracked, flush previous usage before re-tracking
+			if u, ok := usages[name]; ok {
+				u.report(name, pass, a.debug)
+				delete(usages, name)
+			}
+
+			usages[name] = &closableUsage{typeName: typeName, assignPos: assign.Pos()}
+			break
 		}
 	}
 }
 
 // handleDefer checks if a defer statement calls Close() or Abort() on a tracked Batch variable.
-func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*batchUsage) {
+func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*closableUsage) {
 	call := deferStmt.Call
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -169,7 +180,7 @@ func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*batchUsage) {
 }
 
 // handleReturn checks if any return value is a tracked Batch variable.
-func handleReturn(ret *ast.ReturnStmt, usages map[string]*batchUsage) {
+func handleReturn(ret *ast.ReturnStmt, usages map[string]*closableUsage) {
 	for _, result := range ret.Results {
 		name := util.IdentName(result)
 		if name == "" {

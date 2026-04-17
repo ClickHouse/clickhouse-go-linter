@@ -9,6 +9,8 @@ import (
 var conn driver.Conn
 var ctx = context.Background()
 
+// ===== Batch tests =====
+
 // valid: defer Close() after PrepareBatch
 func validDeferClose() {
 	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t")
@@ -61,7 +63,7 @@ func validFromHelper() {
 // invalid assignment to blank identifier.
 // unlikely to exist in real code base but results in a connection leak.
 func toBlankIdentifier() {
-	_, err := conn.PrepareBatch(ctx, "INSERT INTO t") // want `clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer batch\.Close\(\) after successful instantiation`
+	_, err := conn.PrepareBatch(ctx, "INSERT INTO t") // want `clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer Batch\.Close\(\) after successful instantiation`
 	if err != nil {
 		return
 	}
@@ -208,4 +210,116 @@ func invalidNotDefensive() error {
 		return err
 	}
 	return nil
+}
+
+// ===== Rows tests =====
+
+// valid: defer Close() after Query
+func rowsValidDeferClose() {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v int
+		_ = rows.Scan(&v)
+	}
+}
+
+// valid: rows returned to caller
+func rowsValidReturn() (driver.Rows, error) {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// valid: rows returned to caller "without instantiation"
+func helperReturningRows() (driver.Rows, error) {
+	return conn.Query(ctx, "SELECT 1")
+}
+
+// valid: defer Close() after Rows instantiated from helper method
+func rowsValidFromHelper() {
+	rows, err := helperReturningRows()
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v int
+		_ = rows.Scan(&v)
+	}
+}
+
+// invalid: no defer, no return
+func rowsInvalidNoDeferNoReturn() {
+	rows, err := conn.Query(ctx, "SELECT 1") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+	for rows.Next() {
+		var v int
+		_ = rows.Scan(&v)
+	}
+}
+
+// invalid assignment to blank identifier
+func rowsToBlankIdentifier() {
+	_, err := conn.Query(ctx, "SELECT 1") // want `clickhouse Rows assigned to blank identifier. Connection leak. clickhouse Rows must be instantiated and closed defensively with defer Rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+}
+
+// invalid: rows from helper function, no defer, no return
+func rowsInvalidFromHelper() {
+	rows, err := helperReturningRows() //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+	for rows.Next() {
+		var v int
+		_ = rows.Scan(&v)
+	}
+}
+
+// reassignment: first has no defer (invalid), second has defer (valid)
+func rowsReassignInvalidValid() {
+	rows, err := conn.Query(ctx, "SELECT 1") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+	_ = rows.Err()
+
+	rows, err = conn.Query(ctx, "SELECT 2")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+}
+
+// reassignment: first has defer (valid), second has no defer (invalid)
+func rowsReassignValidInvalid() {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	rows, err = conn.Query(ctx, "SELECT 2") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+}
+
+// closures are not supported
+func rowsDeferCloseIsInClosure() {
+	rows, err := conn.Query(ctx, "SELECT 1") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return
+	}
+	defer func() { rows.Close() }()
 }
