@@ -49,6 +49,32 @@ func helperReturningBatch() (driver.Batch, error) {
 	return conn.PrepareBatch(ctx, "INSERT INTO t")
 }
 
+type batchWrapper struct {
+	driver.Batch
+}
+
+func wrapBatch(b driver.Batch) *batchWrapper {
+	return &batchWrapper{b}
+}
+
+// valid: batch returned wrapped in a function call
+func validReturnWrappedInCall() (*batchWrapper, error) {
+	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t")
+	if err != nil {
+		return nil, err
+	}
+	return wrapBatch(batch), nil
+}
+
+// valid: batch returned wrapped in a struct literal
+func validReturnWrappedInStruct() (*batchWrapper, error) {
+	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t")
+	if err != nil {
+		return nil, err
+	}
+	return &batchWrapper{batch}, nil
+}
+
 // valid: defer Close() after Batch is instantiated from helper method
 func validFromHelper() {
 	batch, err := helperReturningBatch()
@@ -239,6 +265,32 @@ func rowsValidReturn() (driver.Rows, error) {
 // valid: rows returned to caller "without instantiation"
 func helperReturningRows() (driver.Rows, error) {
 	return conn.Query(ctx, "SELECT 1")
+}
+
+type rowsWrapper struct {
+	driver.Rows
+}
+
+func wrapRows(r driver.Rows) *rowsWrapper {
+	return &rowsWrapper{r}
+}
+
+// valid: rows returned wrapped in a function call
+func rowsValidReturnWrappedInCall() (*rowsWrapper, error) {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return nil, err
+	}
+	return wrapRows(rows), nil
+}
+
+// valid: rows returned wrapped in a struct literal
+func rowsValidReturnWrappedInStruct() (*rowsWrapper, error) {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return nil, err
+	}
+	return &rowsWrapper{rows}, nil
 }
 
 // valid: defer Close() after Rows instantiated from helper method

@@ -179,15 +179,19 @@ func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*closableUsage) {
 	}
 }
 
-// handleReturn checks if any return value is a tracked Batch variable.
+// handleReturn checks if any return expression contains a tracked variable,
+// including when wrapped in a function call or struct literal (e.g. return NewWrapper(rows), nil).
 func handleReturn(ret *ast.ReturnStmt, usages map[string]*closableUsage) {
 	for _, result := range ret.Results {
-		name := util.IdentName(result)
-		if name == "" {
-			continue
-		}
-		if u, exists := usages[name]; exists {
-			u.returned = true
-		}
+		ast.Inspect(result, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if u, exists := usages[id.Name]; exists {
+				u.returned = true
+			}
+			return true
+		})
 	}
 }
