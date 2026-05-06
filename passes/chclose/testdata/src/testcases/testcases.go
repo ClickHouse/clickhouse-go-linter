@@ -57,9 +57,10 @@ func wrapBatch(b driver.Batch) *batchWrapper {
 	return &batchWrapper{b}
 }
 
-// valid: batch returned wrapped in a function call
-func validReturnWrappedInCall() (*batchWrapper, error) {
-	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t")
+// known false positive: batch returned wrapped in a function call.
+// we cannot statically distinguish wrapping (ownership transfer) from consuming.
+func falsePositiveReturnWrappedInCall() (*batchWrapper, error) {
+	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t") //want `clickhouse Batch batch must be closed defensively with defer batch\.Close\(\) after successful instantiation`
 	if err != nil {
 		return nil, err
 	}
@@ -275,9 +276,10 @@ func wrapRows(r driver.Rows) *rowsWrapper {
 	return &rowsWrapper{r}
 }
 
-// valid: rows returned wrapped in a function call
-func rowsValidReturnWrappedInCall() (*rowsWrapper, error) {
-	rows, err := conn.Query(ctx, "SELECT 1")
+// known false positive: rows returned wrapped in a function call.
+// we cannot statically distinguish wrapping (ownership transfer) from consuming.
+func rowsFalsePositiveReturnWrappedInCall() (*rowsWrapper, error) {
+	rows, err := conn.Query(ctx, "SELECT 1") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +293,28 @@ func rowsValidReturnWrappedInStruct() (*rowsWrapper, error) {
 		return nil, err
 	}
 	return &rowsWrapper{rows}, nil
+}
+
+// known false positive: rows wrapped via function call into intermediate variable then returned.
+// we cannot statically distinguish wrapping (ownership transfer) from consuming (just reads rows).
+func rowsFalsePositiveWrappedViaFuncCall() (*rowsWrapper, error) {
+	rows, err := conn.Query(ctx, "SELECT 1") //want `clickhouse Rows rows must be closed defensively with defer rows\.Close\(\) after successful instantiation`
+	if err != nil {
+		return nil, err
+	}
+	l := wrapRows(rows)
+	return l, nil
+}
+
+// valid: rows stored in struct literal via intermediate variable then returned.
+// struct literals are unambiguous — rows is a field in the returned struct, so ownership is transferred.
+func rowsValidWrappedViaStructLiteral() (*rowsWrapper, error) {
+	rows, err := conn.Query(ctx, "SELECT 1")
+	if err != nil {
+		return nil, err
+	}
+	l := &rowsWrapper{rows}
+	return l, nil
 }
 
 // valid: defer Close() after Rows instantiated from helper method

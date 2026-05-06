@@ -189,12 +189,16 @@ return batch.Send()
 The linter goes through every function.
 If a clickhouse driver `Batch` is instantiated and is not part of the values returned by the function, a `defer batch.Close()` must be found.
 Also, assigning a `Batch` to the blank identifier `_` is flagged.  
-Variable re-assignments and intertwined variable are supported. See [testcases.go](passes/chbatchclose/testdata/src/testcases/testcases.go).
+Variable re-assignments and intertwined variable are supported. See [testcases.go](passes/chclose/testdata/src/testcases/testcases.go).
 
 There are some limitations:
-- except for looking into defer blocks;, the linter does not cross function block boundaries. If a `Batch` variable is instantiated and `batch.Close()` is called in a
-  closure inside the defer call, the linter will not be able to associate the `batch.Close()` to the variable.
-  (note: in most cases such pattern is a bad idea). See `deferCloseIsInClosure` test case.
+- linting of structs wrapping or embedding a `Batch` is not supported 
+- tracking across function calls is not supported: 
+  - if a `Batch` variable is instantiated and returned by a function call `return logAndReturn(batch)`, 
+    the linter cannot know the batch is part of the values returned.
+  - If a `Batch` variable is instantiated and `batch.Close()` is called in a
+    closure inside the defer call, the linter will not be able to associate the `batch.Close()` to the variable.
+    (note: in most cases such pattern is a bad idea). See `deferCloseIsInClosure` test case.
 - `defer batch.Close()` must be called after checking that the `PrepareBatch` call returned no error.
    incorrect: 
    ```

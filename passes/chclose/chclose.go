@@ -119,10 +119,87 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 		return true
 	})
 
-	// remaining usages that were not flushed
+	// for violations, check if the tracked var was stored in a struct literal whose result was returned
 	for varName, u := range usages {
+		if !u.deferredClose && !u.returned && isStoredInStructAndReturned(body, varName) {
+			u.returned = true
+		}
 		u.report(varName, pass, a.debug)
 	}
+}
+
+// isStoredInStructAndReturned checks if varName appears as a value in a composite literal
+// assigned to some variable, and that variable is later returned.
+// This handles: l := &Wrapper{rows}; return l, nil
+func isStoredInStructAndReturned(body *ast.BlockStmt, varName string) bool {
+	// step 1: find assignments where varName is inside a struct literal on the RHS
+	derivedVars := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, rhs := range assign.Rhs {
+			if !compositeLiteralContains(rhs, varName) {
+				continue
+			}
+			if i < len(assign.Lhs) {
+				if lhsName := util.IdentName(assign.Lhs[i]); lhsName != "" {
+					derivedVars[lhsName] = true
+				}
+			}
+		}
+		return true
+	})
+	if len(derivedVars) == 0 {
+		return false
+	}
+
+	// step 2: check if any derived variable is returned
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		for _, result := range ret.Results {
+			if name := util.IdentName(result); name != "" && derivedVars[name] {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// compositeLiteralContains checks if an expression is (or contains via unary &) a composite literal
+// that references varName as a value.
+func compositeLiteralContains(expr ast.Expr, varName string) bool {
+	// unwrap &Wrapper{...}
+	if unary, ok := expr.(*ast.UnaryExpr); ok {
+		expr = unary.X
+	}
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	for _, elt := range lit.Elts {
+		switch e := elt.(type) {
+		case *ast.Ident:
+			if e.Name == varName {
+				return true
+			}
+		case *ast.KeyValueExpr:
+			if id, ok := e.Value.(*ast.Ident); ok && id.Name == varName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // handleAssign checks if any LHS variable in the assignment is a closable ClickHouse driver type.
@@ -179,11 +256,18 @@ func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*closableUsage) {
 	}
 }
 
-// handleReturn checks if any return expression contains a tracked variable,
-// including when wrapped in a function call or struct literal (e.g. return NewWrapper(rows), nil).
+// handleReturn checks if any return expression contains a tracked variable.
+// It recognizes direct returns (return rows, nil) and struct literal wrapping (return &Wrapper{rows}, nil).
+// Function calls in return expressions are NOT walked into (we cannot distinguish
+// wrapping (ownership transfer) from consuming (just reads)).
 func handleReturn(ret *ast.ReturnStmt, usages map[string]*closableUsage) {
 	for _, result := range ret.Results {
 		ast.Inspect(result, func(n ast.Node) bool {
+			switch n.(type) {
+			case *ast.CallExpr:
+				// don't descend into function calls — opaque ownership semantics
+				return false
+			}
 			id, ok := n.(*ast.Ident)
 			if !ok {
 				return true
