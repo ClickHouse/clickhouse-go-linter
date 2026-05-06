@@ -8,7 +8,7 @@ See [documentation](https://clickhouse.com/docs/integrations/go#the-clickhouse-g
 
 The linter detects 2 common implementation mistakes:
 - forgetting to call `rows.Err()` after calling `rows.Next()`
-- forgetting to call `defer batch.Close()` when using `Batch`
+- forgetting to call `defer xxx.Close()` when using `Batch` or `Rows`
 
 These implementation mistakes are often observed in codebases using the clickhouse-go driver. They result 
 in incomplete data and hard-to-troubleshoot bugs.  
@@ -55,6 +55,7 @@ Incorrect code:
 ```go
 parsedRows := []... 
 rows, _ := conn.Query(ctx, "SELECT ...")
+defer rows.Close()
 for rows.Next() {
    parsedRow, err = ....
    if err {
@@ -74,6 +75,7 @@ return parsedRows, nil
 ```go
 parsedRows := []... 
 rows, _ := conn.Query(ctx, "SELECT ...")
+defer rows.Close()
 for rows.Next() {
    parsed, err = ....
    if err {
@@ -130,8 +132,10 @@ There are some limitations:
   --> in this case the linter will not be able to detect that `.Err()` may be called too late. 
 
 
-## 2. chbatchclose
-Detect when a `github.com/ClickHouse/clickhouse-go/v2/lib/driver` `Batch` variable is used but no associated `defer batch.Close()` is called.
+## 2. chclose
+Detect when a `github.com/ClickHouse/clickhouse-go/v2/lib/driver`: `Batch` / `Rows` variable is used but no associated `defer xxx.Close()` is called.
+
+*All examples below are given for `Batch` but apply the same way for `Rows`.*
 
 Calling `defer batch.Close()` is highly recommended (see [here](https://clickhouse.com/docs/integrations/go#batch-insert)).
 While it is possible to not use this statement, code that do not use it often end up with subtle leaks, as the 
@@ -180,15 +184,21 @@ return batch.Send()
 
 ### Rule details
 
+*All examples below are given for `Batch` but apply the same way for `Rows`.*
+
 The linter goes through every function.
 If a clickhouse driver `Batch` is instantiated and is not part of the values returned by the function, a `defer batch.Close()` must be found.
 Also, assigning a `Batch` to the blank identifier `_` is flagged.  
-Variable re-assignments and intertwined variable are supported. See [testcases.go](passes/chbatchclose/testdata/src/testcases/testcases.go).
+Variable re-assignments and intertwined variable are supported. See [testcases.go](passes/chclose/testdata/src/testcases/testcases.go).
 
 There are some limitations:
-- except for looking into defer blocks;, the linter does not cross function block boundaries. If a `Batch` variable is instantiated and `batch.Close()` is called in a
-  closure inside the defer call, the linter will not be able to associate the `batch.Close()` to the variable.
-  (note: in most cases such pattern is a bad idea). See `deferCloseIsInClosure` test case.
+- linting of structs wrapping or embedding a `Batch` is not supported 
+- tracking across function calls is not supported: 
+  - if a `Batch` variable is instantiated and returned by a function call `return logAndReturn(batch)`, 
+    the linter cannot know the batch is part of the values returned.
+  - If a `Batch` variable is instantiated and `batch.Close()` is called in a
+    closure inside the defer call, the linter will not be able to associate the `batch.Close()` to the variable.
+    (note: in most cases such pattern is a bad idea). See `deferCloseIsInClosure` test case.
 - `defer batch.Close()` must be called after checking that the `PrepareBatch` call returned no error.
    incorrect: 
    ```
