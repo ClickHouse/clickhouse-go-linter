@@ -172,9 +172,6 @@ func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*batchUsage) {
 		if fun.Type.Params != nil && len(fun.Type.Params.List) > 0 {
 			return
 		}
-		if fun.Body == nil {
-			return
-		}
 		handleDeferredClosure(fun.Body, usages)
 	}
 }

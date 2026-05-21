@@ -185,10 +185,19 @@ If a clickhouse driver `Batch` is instantiated and is not part of the values ret
 Also, assigning a `Batch` to the blank identifier `_` is flagged.  
 Variable re-assignments and intertwined variable are supported. See [testcases.go](passes/chbatchclose/testdata/src/testcases/testcases.go).
 
+The linter recognizes two forms of `defer`:
+- direct call: `defer batch.Close()`
+- immediately-invoked closure: `defer func() { ... batch.Close() ... }()` (useful for wrapping the `Close` error).
+
 There are some limitations:
-- except for looking into defer blocks;, the linter does not cross function block boundaries. If a `Batch` variable is instantiated and `batch.Close()` is called in a
-  closure inside the defer call, the linter will not be able to associate the `batch.Close()` to the variable.
-  (note: in most cases such pattern is a bad idea). See `deferCloseIsInClosure` test case.
+- the linter does not cross function call boundaries. In particular:
+  - a closure passed as an argument (e.g. `defer func(b driver.Batch) { b.Close() }(batch)`) is not recognized.
+  - a helper function that closes the batch (e.g. `defer closeWithLog(batch)`) is not recognized.
+- inside a deferred closure, the linter does not descend into nested closures or goroutines.
+  `defer func() { go func() { batch.Close() }() }()` is not recognized as a valid close.
+- inside a deferred closure, tracking is name-based and does not consult type information, so shadowing the
+  outer batch name with another `Close`-able local can hide a missing close. See `deferCloseInClosureShadowed`
+  test case. We expect IDE / shadow linter to flag this as a bad pattern.
 - `defer batch.Close()` must be called after checking that the `PrepareBatch` call returned no error.
    incorrect: 
    ```
