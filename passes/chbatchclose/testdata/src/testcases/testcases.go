@@ -245,6 +245,28 @@ func invalidDeferAbortInClosure() {
 	defer func() { _ = batch.Abort() }()
 }
 
+// known limitation / false negative: a deferred closure shadows the outer `batch` name
+// with a non-Batch local that is .Close()'d. The outer Batch is never closed, but the
+// linter currently credits the inner .Close() to the outer name because tracking is
+// name-based and does not consult type info inside the deferred closure body.
+// In practice this is a contrived pattern that any IDE / shadow linter would flag.
+func deferCloseInClosureShadowed() {
+	batch, err := conn.PrepareBatch(ctx, "INSERT INTO t")
+	if err != nil {
+		return
+	}
+	// no defer batch.Close() on the outer Batch — should ideally be reported.
+	defer func() {
+		batch := fakeCloser{} // shadows outer `batch`
+		_ = batch.Close()
+	}()
+	_ = batch.Send()
+}
+
+type fakeCloser struct{}
+
+func (fakeCloser) Close() error { return nil }
+
 // the code below is in theory correct as all error cases are handled and result in a batch.Abort().
 // we still mark this as an error as it's not defensive. A defer batch.Close() would not change the code correctness and is easy to add.
 func invalidNotDefensive() error {
