@@ -8,4 +8,4 @@ import (
 
 func main() {
 	multichecker.Main(chrowserr.NewAnalyzer(), chbatchclose.NewAnalyzer())
-}
+}ok
