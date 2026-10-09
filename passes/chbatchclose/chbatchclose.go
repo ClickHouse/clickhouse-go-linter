@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ClickHouse/clickhouse-go-linter/internal/util"
+	"github.com/ClickHouse/clickhouse-go-linter/internal/astutil"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -125,11 +125,11 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 // If a tracked variable is reassigned, it flushes/reports the previous tracking first.
 func (a *analyzer) handleAssign(pass *analysis.Pass, assign *ast.AssignStmt, usages map[string]*batchUsage) {
 	for _, lhs := range assign.Lhs {
-		name := util.IdentName(lhs)
+		name := astutil.IdentName(lhs)
 		if name == "" {
 			continue
 		}
-		if name == "_" && util.IsChObj(pass, lhs, "Batch") {
+		if name == "_" && astutil.IsChObj(pass, lhs, "Batch") {
 			pass.Reportf(assign.Pos(), "clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer batch.Close() after successful instantiation")
 			continue
 		}
@@ -140,7 +140,7 @@ func (a *analyzer) handleAssign(pass *analysis.Pass, assign *ast.AssignStmt, usa
 			delete(usages, name)
 		}
 
-		if util.IsChObj(pass, lhs, "Batch") {
+		if astutil.IsChObj(pass, lhs, "Batch") {
 			usages[name] = &batchUsage{assignPos: assign.Pos()}
 		}
 	}
@@ -156,7 +156,7 @@ func handleDefer(deferStmt *ast.DeferStmt, usages map[string]*batchUsage) {
 
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		varName := util.IdentName(fun.X)
+		varName := astutil.IdentName(fun.X)
 		if varName == "" {
 			return
 		}
@@ -202,7 +202,7 @@ func handleDeferredClosure(body *ast.BlockStmt, usages map[string]*batchUsage) {
 		if sel.Sel.Name != "Close" {
 			return true
 		}
-		varName := util.IdentName(sel.X)
+		varName := astutil.IdentName(sel.X)
 		if varName == "" {
 			return true
 		}
@@ -216,7 +216,7 @@ func handleDeferredClosure(body *ast.BlockStmt, usages map[string]*batchUsage) {
 // handleReturn checks if any return value is a tracked Batch variable.
 func handleReturn(ret *ast.ReturnStmt, usages map[string]*batchUsage) {
 	for _, result := range ret.Results {
-		name := util.IdentName(result)
+		name := astutil.IdentName(result)
 		if name == "" {
 			continue
 		}

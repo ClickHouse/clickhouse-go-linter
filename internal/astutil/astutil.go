@@ -1,4 +1,5 @@
-package util
+// Package astutil provides helpers for inspecting Go AST nodes in the linter passes.
+package astutil
 
 import (
 	"go/ast"

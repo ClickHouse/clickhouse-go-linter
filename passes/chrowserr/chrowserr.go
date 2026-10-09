@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ClickHouse/clickhouse-go-linter/internal/util"
+	"github.com/ClickHouse/clickhouse-go-linter/internal/astutil"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
@@ -100,7 +100,7 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 		// if a tracked var appears in an assignment, it means it is re-assigned - run lint report and flush var from usages.
 		if assign, ok := n.(*ast.AssignStmt); ok {
 			for _, lhs := range assign.Lhs {
-				name := util.IdentName(lhs)
+				name := astutil.IdentName(lhs)
 				if name == "" {
 					continue
 				}
@@ -122,11 +122,11 @@ func (a *analyzer) checkFunc(pass *analysis.Pass, body *ast.BlockStmt) {
 		if !ok {
 			return true
 		}
-		varName := util.IdentName(sel.X)
+		varName := astutil.IdentName(sel.X)
 		if varName == "" {
 			return true
 		}
-		if !util.IsChObj(pass, sel.X, "Rows") {
+		if !astutil.IsChObj(pass, sel.X, "Rows") {
 			return true
 		}
 
